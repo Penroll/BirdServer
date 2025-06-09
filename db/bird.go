@@ -9,7 +9,6 @@ import (
 	"gorm.io/gorm"
 	"log"
 	"os"
-	"time"
 )
 
 type HourlyObservations map[int]int
@@ -30,8 +29,16 @@ type BirdData struct {
 	ID                 uint   `gorm:"primary_key;auto_increment"`
 	Name               string `gorm:"not null"`
 	FeederToken        string `gorm:"not null;index"`
-	CreatedAt          time.Time
+	LastSeen           int64
+	CurrentlyObserved  bool               `gorm:"not null"`
 	HourlyObservations HourlyObservations `gorm:"type:json"`
+}
+
+type BirdDTO struct {
+	Name               string             `json:"name"`
+	LastSeen           int64              `json:"lastSeen"`
+	CurrentlyObserving bool               `json:"currentlyObserving"`
+	HourlyObservations HourlyObservations `json:"hourlyObservations"`
 }
 
 func ConnectDB() *gorm.DB {

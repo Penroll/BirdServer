@@ -6,30 +6,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"gorm.io/gorm"
-	"mime/multipart"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
-// TODO: Get databse queries out of here
 func GetBirdsHandler(database *gorm.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		feederToken := strings.TrimPrefix(authHeader, "Bearer ")
 		var birdData []db.BirdData
-		database.Select("name").Where("feeder_token = ?", feederToken).Find(&birdData)
-
-		var birdNames []string
-		for _, bird := range birdData {
-			birdNames = append(birdNames, bird.Name+",")
+		database.Where("feeder_token = ?", feederToken).Find(&birdData)
+		finalStrings, err := models.ConvertBirdDataToDTO(birdData)
+		if err != nil {
+			fmt.Println(err)
 		}
-		slices.Sort(birdNames)
-		finalStrings := fmt.Sprint(slices.Compact(birdNames))
-		// Remove the final comma
-		finalStrings = finalStrings[:len(finalStrings)-2] + "]"
 		_, _ = fmt.Fprintf(w, finalStrings)
 	}
 }
@@ -50,33 +43,44 @@ func IdentifyBirdsHandler(database *gorm.DB) http.HandlerFunc {
 		authHeader := r.Header.Get("Authorization")
 		feederToken := strings.TrimPrefix(authHeader, "Bearer ")
 		// Limit request size to prevent abuse (e.g., 10MB)
-		err := r.ParseMultipartForm(10 << 20)
-		if err != nil {
-			http.Error(w, "Error: File too large. Please limit to 10MB.", http.StatusBadRequest)
-			return
-		} // 10MB
+		r.ParseMultipartForm(10 << 20)
 
+		// Get uploaded file
 		file, header, err := r.FormFile("image")
 		if err != nil {
-			http.Error(w, "Error reading image: "+err.Error(), http.StatusBadRequest)
+			http.Error(w, "Failed to get uploaded file: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		defer func(file multipart.File) {
-			err := file.Close()
-			if err != nil {
-				http.Error(w, "Error closing file: "+err.Error(), http.StatusInternalServerError)
-			}
-		}(file)
+		defer file.Close()
 
-		// Optional: Save the image locally
+		// Ensure uploads folder exists
+		os.MkdirAll("uploads", os.ModePerm)
+
+		// Save the file locally
 		savePath := filepath.Join("uploads", header.Filename)
+		out, err := os.Create(savePath)
+		if err != nil {
+			http.Error(w, "Failed to create file: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer out.Close()
 
-		// Optional: Send to Python microservice and get JSON result
+		_, err = io.Copy(out, file)
+		if err != nil {
+			http.Error(w, "Failed to save file: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Call your Python microservice (replace this with your actual logic)
 		result, err := models.SendImageAndReceiveJSON(savePath)
 		if err != nil {
+			os.Remove(savePath) // clean up even on error
 			http.Error(w, "Microservice error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// Clean up the uploaded file
+		os.Remove(savePath)
 
 		toPrint := models.ConvertDetectionsToString(result)
 		println(toPrint)

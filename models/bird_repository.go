@@ -33,7 +33,16 @@ func AddBirdsToDb(data map[string]interface{}, feederToken string, database *gor
 		}
 	}
 	hour := time.Now().Hour()
+	var currentBirds []db.BirdData
+	err1 := database.Where("currently_observed = true AND feeder_token = ?", feederToken).Find(&currentBirds).Error
+	if err1 == nil {
+		for _, birdData := range currentBirds {
+			birdData.CurrentlyObserved = false
+		}
+		database.Save(&currentBirds)
+	}
 	for _, bird := range birds {
+
 		var foundBird db.BirdData
 		err := database.Where("name = ? AND feeder_token = ?", bird, feederToken).First(&foundBird).Error
 		if err == nil {
@@ -41,12 +50,15 @@ func AddBirdsToDb(data map[string]interface{}, feederToken string, database *gor
 				foundBird.HourlyObservations = make(db.HourlyObservations)
 			}
 			foundBird.HourlyObservations[hour]++
+			foundBird.CurrentlyObserved = true
+			foundBird.LastSeen = time.Now().Unix()
 			database.Save(&foundBird)
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
 			newBird := db.BirdData{
-				Name:        bird,
-				FeederToken: feederToken,
-				CreatedAt:   time.Now(),
+				Name:              bird,
+				FeederToken:       feederToken,
+				LastSeen:          time.Now().Unix(),
+				CurrentlyObserved: true,
 				HourlyObservations: db.HourlyObservations{
 					hour: 1,
 				},
@@ -84,7 +96,7 @@ func SendImageAndReceiveJSON(inputPath string) (map[string]interface{}, error) {
 	}
 	_ = writer.Close()
 
-	req, err := http.NewRequest("POST", "http://18.216.209.5:5000/process-image", body)
+	req, err := http.NewRequest("POST", "http://0.0.0.0:5000/process-image", body)
 	if err != nil {
 		return nil, err
 	}
@@ -129,4 +141,23 @@ func ConvertDetectionsToString(data map[string]interface{}) string {
 	// Join into one string with \n
 	output := strings.Join(lines, "\n")
 	return output
+}
+
+func ConvertBirdDataToDTO(birdData []db.BirdData) (string, error) {
+	var dtos []db.BirdDTO
+	for _, birdData := range birdData {
+		newDTO := db.BirdDTO{
+			Name:               birdData.Name,
+			LastSeen:           birdData.LastSeen,
+			CurrentlyObserving: birdData.CurrentlyObserved,
+			HourlyObservations: birdData.HourlyObservations,
+		}
+		dtos = append(dtos, newDTO)
+	}
+	jsonData, err := json.Marshal(dtos)
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonData), nil
 }
