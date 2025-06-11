@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/joho/godotenv"
 	"gorm.io/gorm"
 	"io"
 	"log"
@@ -83,7 +84,7 @@ func SendImageAndReceiveJSON(inputPath string) (map[string]interface{}, error) {
 		return nil, err
 	}
 	defer file.Close()
-
+	godotenv.Load()
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	part, err := writer.CreateFormFile("file", filepath.Base(inputPath))
@@ -96,7 +97,7 @@ func SendImageAndReceiveJSON(inputPath string) (map[string]interface{}, error) {
 	}
 	_ = writer.Close()
 
-	req, err := http.NewRequest("POST", "http://0.0.0.0:5000/process-image", body)
+	req, err := http.NewRequest("POST", "http://"+os.Getenv("MICROSERVICE_IP")+":5000/process-image", body)
 	if err != nil {
 		return nil, err
 	}
